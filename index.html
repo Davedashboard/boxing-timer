@@ -157,6 +157,7 @@ a.yt{color:#ff5a5a;text-decoration:none;font-weight:600;font-size:13px}
     <div class="row"><label>Clapper at 10 seconds</label><label class="toggle"><input type="checkbox" data-c="clap"><span></span></label></div>
     <div class="row"><label>Beeps 3-2-1</label><label class="toggle"><input type="checkbox" data-c="beeps"><span></span></label></div>
     <div class="row"><label>Vibrate<span class="hint">Android only</span></label><label class="toggle"><input type="checkbox" data-c="vib"><span></span></label></div>
+    <div class="row"><label>Voice<span class="hint">Says the next exercise just after the 10s clapper</span></label><label class="toggle"><input type="checkbox" data-c="voice"><span></span></label></div>
     <div class="flex" style="margin-top:8px"><button class="btn sm" id="testSnd">🔊 Test sounds</button><span class="mut">Single bell = go · triple bell = end of round</span></div>
   </div>
 
@@ -235,7 +236,7 @@ const FOCUS={
 };
 
 /* ---------- state ---------- */
-const DEF_CFG={mode:'timer',rounds:3,work:180,rest:60,ready:10,focus:'upper',count:8,sets:3,order:'circuit',setRest:0,clap:true,beeps:true,vib:true};
+const DEF_CFG={mode:'timer',rounds:3,work:180,rest:60,ready:10,focus:'upper',count:8,sets:3,order:'circuit',setRest:0,clap:true,beeps:true,vib:true,voice:true};
 let st={cfg:{...DEF_CFG},list:[],off:{},custom:[],presets:[],preset:'p-boxing'};
 try{const s=JSON.parse(localStorage.getItem(KEY)||'null'); if(s){st={...st,...s,cfg:{...DEF_CFG,...(s.cfg||{})}};}}catch(e){}
 const cfg=()=>st.cfg;
@@ -421,6 +422,7 @@ $('#libList').addEventListener('click',e=>{const id=e.target.dataset&&e.target.d
 let ac,master,nbuf;
 function A(){ if(!ac){const C=window.AudioContext||window.webkitAudioContext; ac=new C(); master=ac.createGain(); master.gain.value=0.9; master.connect(ac.destination);} if(ac.state==='suspended') ac.resume(); return ac; }
 function unlock(){
+  try{ if('speechSynthesis' in window && !window.__spk){ window.__spk=1; const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u);} }catch(e){}
   try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
   try{ const c=A(), b=c.createBuffer(1,1,22050), s=c.createBufferSource(); s.buffer=b; s.connect(c.destination); s.start(0);}catch(e){}
 }
@@ -450,8 +452,15 @@ function bellAt(at){
   });
 }
 const ding=n=>{for(let i=0;i<n;i++)bellAt(i*0.36);};
+let voiceSel=null;
+function pickVoice(){ try{ const vs=speechSynthesis.getVoices(); voiceSel=vs.find(v=>/en[-_]GB/i.test(v.lang))||vs.find(v=>/^en/i.test(v.lang))||null; }catch(e){} }
+try{ if('speechSynthesis' in window){ pickVoice(); speechSynthesis.addEventListener('voiceschanged',pickVoice); } }catch(e){}
+function say(text){
+  if(!cfg().voice) return;
+  try{ const u=new SpeechSynthesisUtterance(text); if(voiceSel){u.voice=voiceSel;u.lang=voiceSel.lang;} else u.lang='en-GB'; u.rate=1; u.volume=1; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){}
+}
 const vib=p=>{ if(cfg().vib) try{navigator.vibrate&&navigator.vibrate(p);}catch(e){} };
-$('#testSnd').onclick=()=>{unlock();ding(1);setTimeout(clapper,900);[0,1,2].forEach(i=>setTimeout(()=>beep(),1900+i*1000));setTimeout(()=>ding(3),4900);};
+$('#testSnd').onclick=()=>{unlock();ding(1);setTimeout(clapper,900);[0,1,2].forEach(i=>setTimeout(()=>beep(),1900+i*1000));setTimeout(()=>ding(3),4900);setTimeout(()=>say('Next up: bicep curls'),6400);};
 
 /* ---------- sequence ---------- */
 function workOrder(){
@@ -482,11 +491,13 @@ function buildSeq(){
 }
 
 /* ---------- runner ---------- */
-let seq=[],idx=0,pEnd=0,paused=null,fired={},iv=null,wake=null,stopArm=0;
+let seq=[],idx=0,pEnd=0,paused=null,fired={},iv=null,wake=null,stopArm=0,announced=-1;
 const now=()=>performance.now();
+function nextWorkIdx(i){for(let j=i+1;j<seq.length;j++)if(seq[j].type==='work')return j;return -1;}
 function nextWork(i){for(let j=i+1;j<seq.length;j++)if(seq[j].type==='work')return seq[j];return null;}
 
 function startRun(){
+  announced=-1;
   unlock(); seq=buildSeq(); if(!seq.some(p=>p.type==='work')) return;
   $('#run').classList.remove('done'); show('run'); begin(0,now());
   clearInterval(iv); iv=setInterval(tick,100); reqWake();
@@ -507,6 +518,11 @@ function tick(){
   }
   const p=seq[idx], left=pEnd-t, s=Math.ceil(left/1000);
   if(cfg().clap && p.dur>=15 && s<=10 && s>4 && !fired.c){ fired.c=1; clapper(); vib([60,140,60,140,60]); }
+  // voice: name the next exercise ~1s after the 10-second clapper (once per exercise)
+  if(cfg().voice && s<=9 && s>4 && !fired.v){
+    fired.v=1; const ni=nextWorkIdx(idx);
+    if(ni>=0 && seq[ni].ex && announced!==ni){ announced=ni; const e=exById(seq[ni].ex); if(e) say('Next up: '+e.name); }
+  }
   if(cfg().beeps && p.dur>=5){ [3,2,1].forEach(k=>{ if(s===k&&!fired['b'+k]){ fired['b'+k]=1; beep(); vib(120);} }); }
   draw(left);
 }
@@ -550,7 +566,7 @@ function togglePause(){
 }
 $('#cPause').onclick=togglePause; $('#rTime').onclick=togglePause;
 $('#cSkip').onclick=()=>{ if(!seq.length) return; if(idx>=seq.length-1){finish();return;} begin(idx+1,now()); };
-$('#cBack').onclick=()=>{ if(!seq.length) return; const p=seq[idx], el=p.dur*1000-(paused!==null?paused:pEnd-now()); begin(el>2500?idx:Math.max(0,idx-1),now(),true); };
+$('#cBack').onclick=()=>{ if(!seq.length) return; announced=-1; const p=seq[idx], el=p.dur*1000-(paused!==null?paused:pEnd-now()); begin(el>2500?idx:Math.max(0,idx-1),now(),true); };
 $('#cStop').onclick=()=>{
   if(!seq.length){ show('setup'); render(); return; }
   if(!stopArm){ stopArm=1; $('#cStop').textContent='Stop?'; $('#cStop').style.fontSize='16px'; setTimeout(()=>{stopArm=0;$('#cStop').textContent='✕';$('#cStop').style.fontSize='';},2500); return; }
