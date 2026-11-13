@@ -99,7 +99,7 @@ a.yt{color:#ff5a5a;text-decoration:none;font-weight:600;font-size:13px}
 
 <!-- SETUP -->
 <section id="setup" class="view on">
-  <h1>ROUND TIMER <button class="btn sm" id="toLib">Exercises</button></h1>
+  <h1><span>ROUND TIMER <small id="ver" style="font-size:12px;color:var(--mut);font-weight:400">v3</small></span> <button class="btn sm" id="toLib">Exercises</button></h1>
 
   <div class="card">
     <h2>Preset</h2>
@@ -586,6 +586,14 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 render();
 })();
 </script>
-<script>if('serviceWorker' in navigator){addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}</script>
+<script>
+if('serviceWorker' in navigator){
+  addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>{ r.update().catch(()=>{}); }).catch(()=>{});
+  });
+  let reloaded=false, hadCtrl=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadCtrl && !reloaded){ reloaded=true; location.reload(); } });
+}
+</script>
 </body>
 </html>
