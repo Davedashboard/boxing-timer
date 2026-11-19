@@ -99,7 +99,7 @@ a.yt{color:#ff5a5a;text-decoration:none;font-weight:600;font-size:13px}
 
 <!-- SETUP -->
 <section id="setup" class="view on">
-  <h1><span>ROUND TIMER <small id="ver" style="font-size:12px;color:var(--mut);font-weight:400">v3</small></span> <button class="btn sm" id="toLib">Exercises</button></h1>
+  <h1><span>ROUND TIMER <small id="ver" style="font-size:12px;color:var(--mut);font-weight:400">v4</small></span> <button class="btn sm" id="toLib">Exercises</button></h1>
 
   <div class="card">
     <h2>Preset</h2>
@@ -208,6 +208,7 @@ a.yt{color:#ff5a5a;text-decoration:none;font-weight:600;font-size:13px}
 (function(){
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const KEY='roundtimer.v1';
+const NATIVE=!!window.AndroidApp;
 
 /* ---------- exercise library ---------- */
 const CATS={biceps:'Biceps',triceps:'Triceps',chest:'Chest',shoulders:'Shoulders',back:'Back',core:'Core',legs:'Legs',cardio:'Cardio',fight:'Boxing / Muay Thai'};
@@ -422,7 +423,7 @@ $('#libList').addEventListener('click',e=>{const id=e.target.dataset&&e.target.d
 let ac,master,nbuf;
 function A(){ if(!ac){const C=window.AudioContext||window.webkitAudioContext; ac=new C(); master=ac.createGain(); master.gain.value=0.9; master.connect(ac.destination);} if(ac.state==='suspended') ac.resume(); return ac; }
 function unlock(){
-  try{ if('speechSynthesis' in window && !window.__spk){ window.__spk=1; const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u);} }catch(e){}
+  try{ if(!NATIVE && 'speechSynthesis' in window && !window.__spk){ window.__spk=1; const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u);} }catch(e){}
   try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
   try{ const c=A(), b=c.createBuffer(1,1,22050), s=c.createBufferSource(); s.buffer=b; s.connect(c.destination); s.start(0);}catch(e){}
 }
@@ -457,9 +458,10 @@ function pickVoice(){ try{ const vs=speechSynthesis.getVoices(); voiceSel=vs.fin
 try{ if('speechSynthesis' in window){ pickVoice(); speechSynthesis.addEventListener('voiceschanged',pickVoice); } }catch(e){}
 function say(text){
   if(!cfg().voice) return;
+  if(NATIVE){ try{AndroidApp.speak(text);}catch(e){} return; }
   try{ const u=new SpeechSynthesisUtterance(text); if(voiceSel){u.voice=voiceSel;u.lang=voiceSel.lang;} else u.lang='en-GB'; u.rate=1; u.volume=1; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){}
 }
-const vib=p=>{ if(cfg().vib) try{navigator.vibrate&&navigator.vibrate(p);}catch(e){} };
+const vib=p=>{ if(!cfg().vib) return; try{ if(NATIVE) AndroidApp.vibrate(Array.isArray(p)?p.join(','):String(p)); else navigator.vibrate&&navigator.vibrate(p);}catch(e){} };
 $('#testSnd').onclick=()=>{unlock();ding(1);setTimeout(clapper,900);[0,1,2].forEach(i=>setTimeout(()=>beep(),1900+i*1000));setTimeout(()=>ding(3),4900);setTimeout(()=>say('Next up: bicep curls'),6400);};
 
 /* ---------- sequence ---------- */
@@ -577,17 +579,28 @@ $('#startBtn').onclick=startRun;
 /* keep screen awake */
 async function reqWake(){
   $('#rTip').textContent='';
+  if(NATIVE) return; // the app keeps the screen on itself
   try{ if('wakeLock' in navigator){ wake=await navigator.wakeLock.request('screen'); return; } }catch(e){}
   $('#rTip').textContent='Tip: set your screen to stay on — timers pause when the phone locks.';
 }
 function releaseWake(){ try{wake&&wake.release();}catch(e){} wake=null; }
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(seq.length){ if(!wake) reqWake(); A(); tick(); } } });
 
+// Android back button
+window.__back=()=>{
+  if($('#library').classList.contains('on')){ render(); show('setup'); return true; }
+  if($('#run').classList.contains('on')){
+    if(!seq.length){ show('setup'); render(); return true; }
+    $('#rTip').textContent='Tap ✕ twice to stop the workout'; return true;
+  }
+  return false;
+};
+
 render();
 })();
 </script>
 <script>
-if('serviceWorker' in navigator){
+if('serviceWorker' in navigator && !window.AndroidApp){
   addEventListener('load',()=>{
     navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>{ r.update().catch(()=>{}); }).catch(()=>{});
   });
