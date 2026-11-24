@@ -93,13 +93,19 @@ a.yt{color:#ff5a5a;text-decoration:none;font-weight:600;font-size:13px}
 .libitem{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
 .libitem .grow{font-weight:600}
 .libitem.off .grow{color:var(--mut);text-decoration:line-through}
+.dur{margin-left:6px;font-family:Oswald,sans-serif;font-size:13px;padding:2px 9px;border-radius:6px;background:var(--card2);color:var(--mut);border:1px solid var(--line)}
+.dur.on{background:var(--acc);border-color:var(--acc);color:#111}
+.exlist li.durrow{border-top:0;padding:0 0 10px 42px;gap:8px}
+.durrow .stepper output{min-width:56px}
+.merge{background:var(--card2);border:1px solid var(--acc);border-radius:12px;padding:10px 12px;margin-top:10px;font-size:14px}
+.merge .flex{margin-top:8px}
 </style>
 </head>
 <body>
 
 <!-- SETUP -->
 <section id="setup" class="view on">
-  <h1><span>ROUND TIMER <small id="ver" style="font-size:12px;color:var(--mut);font-weight:400">v4</small></span> <button class="btn sm" id="toLib">Exercises</button></h1>
+  <h1><span>ROUND TIMER <small id="ver" style="font-size:12px;color:var(--mut);font-weight:400">v5</small></span> <button class="btn sm" id="toLib">Exercises</button></h1>
 
   <div class="card">
     <h2>Preset</h2>
@@ -146,6 +152,8 @@ a.yt{color:#ff5a5a;text-decoration:none;font-weight:600;font-size:13px}
     <div class="flex" style="margin-top:10px">
       <button class="btn acc grow" id="genBtn">🎲 Build workout</button>
     </div>
+    <div class="mut" style="margin-top:8px">Tap an exercise's time to give it its own length.</div>
+    <div class="merge" id="mergeBar" style="display:none"></div>
     <ul class="exlist" id="exList"></ul>
     <div class="flex" style="margin-top:10px">
       <select id="addSel" class="grow"></select>
@@ -241,6 +249,12 @@ const DEF_CFG={mode:'timer',rounds:3,work:180,rest:60,ready:10,focus:'upper',cou
 let st={cfg:{...DEF_CFG},list:[],off:{},custom:[],presets:[],preset:'p-boxing'};
 try{const s=JSON.parse(localStorage.getItem(KEY)||'null'); if(s){st={...st,...s,cfg:{...DEF_CFG,...(s.cfg||{})}};}}catch(e){}
 const cfg=()=>st.cfg;
+// list items are {id, dur}; dur 0 = use the normal round time (old saves/presets stored plain ids)
+const norm=x=>typeof x==='string'?{id:x,dur:0}:{id:x.id,dur:+x.dur||0};
+st.list=(st.list||[]).map(norm);
+const durOf=it=>it.dur||cfg().work;
+const DUR_MAX=600;
+let editDur=-1, mergeAt=-1;
 function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}
 
 function lib(){
@@ -303,34 +317,48 @@ function generate(){
   const f=FOCUS[cfg().focus], used=new Set(), pA={v:Math.random()*f.A.length|0}, pB={v:Math.random()*f.B.length|0}, res=[];
   for(let i=0;i<cfg().count;i++){
     const ex = i%2===0 ? pickFor(f.A,pA,used) : pickFor(f.B,pB,used);
-    if(ex){used.add(ex.id);res.push(ex.id);}
+    if(ex){used.add(ex.id);res.push({id:ex.id,dur:0});}
   }
-  st.list=res; markCustom(); save(); render();
+  st.list=res; editDur=-1; mergeAt=-1; markCustom(); save(); render();
 }
 function syncCount(){
   // keep list length in step with the Exercises count
   const n=cfg().count;
   if(st.list.length>n) st.list=st.list.slice(0,n);
   else if(st.list.length<n && st.list.length){
-    const f=FOCUS[cfg().focus], used=new Set(st.list);
+    const f=FOCUS[cfg().focus], used=new Set(st.list.map(x=>x.id));
     while(st.list.length<n){
       const slot= st.list.length%2===0?f.A:f.B;
       const ex=pickFor(slot,{v:Math.random()*slot.length|0},used); if(!ex) break;
-      used.add(ex.id); st.list.push(ex.id);
+      used.add(ex.id); st.list.push({id:ex.id,dur:0});
     }
   }
 }
 function swapAt(i){
-  const cur=exById(st.list[i]); if(!cur) return;
-  const pool=shuffle(lib().filter(e=>e.on&&e.cat===cur.cat&&!st.list.includes(e.id)));
-  if(pool.length){st.list[i]=pool[0].id;}
+  const cur=exById(st.list[i].id); if(!cur) return;
+  const pool=shuffle(lib().filter(e=>e.on&&e.cat===cur.cat&&!st.list.some(x=>x.id===e.id)));
+  if(pool.length){st.list[i]={id:pool[0].id,dur:st.list[i].dur};}
   markCustom(); save(); render();
+}
+// same exercise back-to-back? offer to combine into one longer round
+function offerMerge(i){
+  mergeAt=-1;
+  for(const j of [i-1,i]) if(j>=0 && j+1<st.list.length && st.list[j].id===st.list[j+1].id){ mergeAt=j; break; }
+}
+function setDur(i,v){
+  const it=st.list[i]; if(!it) return;
+  v=Math.max(5,Math.min(DUR_MAX,v)); it.dur= v===cfg().work?0:v;
+  markCustom(); save(); render();
+}
+function stepDur(i,d){
+  const v=durOf(st.list[i]);
+  setDur(i, d>0 ? v+(v<60?5:15) : v-(v<=60?5:15));
 }
 
 /* ---------- render setup ---------- */
 function render(){
   const c=cfg();
-  $$('.stepper').forEach(el=>{const k=el.dataset.k;el.querySelector('output').textContent=STEP[k].t?fmt(c[k]):c[k];});
+  $$('.stepper[data-k]').forEach(el=>{const k=el.dataset.k;el.querySelector('output').textContent=STEP[k].t?fmt(c[k]):c[k];});
   $$('#modeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===c.mode));
   $$('#orderSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===c.order));
   $('#roundsRow').style.display=c.mode==='timer'?'':'none';
@@ -343,13 +371,24 @@ function render(){
   $('#focusChips').innerHTML=Object.entries(FOCUS).map(([k,f])=>`<button class="chip ${k===c.focus?'on':''}" data-f="${k}">${f.name}</button>`).join('');
   // list
   if(c.mode==='workout' && st.list.length){ if(c.count!==st.list.length){c.count=Math.max(2,Math.min(20,st.list.length)); $('[data-k=count] output').textContent=c.count;} }
-  $('#exList').innerHTML=st.list.map((id,i)=>{
-    const e=exById(id); if(!e) return '';
+  $('#exList').innerHTML=st.list.map((it,i)=>{
+    const e=exById(it.id); if(!e) return '';
     const label= c.order==='superset' ? (Math.floor(i/2)+1)+(i%2?'B':'A') : (i+1);
     const gap= c.order==='superset' && i>0 && i%2===0 ? 'pairgap':'';
-    return `<li class="${gap}"><span class="num">${label}</span><span class="nm"><b>${esc(e.name)}</b><span class="tag">${CATS[e.cat]||e.cat}</span> <a class="yt" href="${ytUrl(e)}" target="_blank" rel="noopener">▶ how to</a></span>
+    let h=`<li class="${gap}"><span class="num">${label}</span><span class="nm"><b>${esc(e.name)}</b><span class="tag">${CATS[e.cat]||e.cat}</span><button class="dur ${it.dur?'on':''}" data-a="dur" data-i="${i}">⏱ ${fmt(durOf(it))}</button> <a class="yt" href="${ytUrl(e)}" target="_blank" rel="noopener">▶ how to</a></span>
       <button class="ib" data-a="up" data-i="${i}">↑</button><button class="ib" data-a="swap" data-i="${i}">⟳</button><button class="ib" data-a="del" data-i="${i}">✕</button></li>`;
+    if(i===editDur) h+=`<li class="durrow"><div class="stepper"><button data-a="dm" data-i="${i}">−</button><output>${fmt(durOf(it))}</output><button data-a="dp" data-i="${i}">+</button></div>
+      <button class="btn sm" data-a="dreset" data-i="${i}" title="Back to ${fmt(c.work)}">Reset</button><button class="btn sm acc" data-a="dur" data-i="${i}">Done</button></li>`;
+    return h;
   }).join('') || (c.mode==='workout'?'<li class="mut">Pick a focus and tap Build workout, or add exercises below.</li>':'');
+  // combine prompt
+  const mb=$('#mergeBar'), ma=st.list[mergeAt], mb2=st.list[mergeAt+1];
+  if(c.mode==='workout' && ma && mb2 && ma.id===mb2.id && exById(ma.id)){
+    const t=Math.min(DUR_MAX,durOf(ma)+durOf(mb2));
+    mb.innerHTML=`<b>${esc(exById(ma.id).name)}</b> is back-to-back (${fmt(durOf(ma))} + ${fmt(durOf(mb2))}). Combine into one ${fmt(t)} round?
+      <div class="flex"><button class="btn sm acc" id="mergeYes">Combine</button><button class="btn sm" id="mergeNo">Keep separate</button></div>`;
+    mb.style.display='';
+  } else { mergeAt=-1; mb.style.display='none'; }
   // add select
   const L=lib().filter(e=>e.on);
   $('#addSel').innerHTML='<option value="">+ Add an exercise…</option>'+Object.entries(CATS).map(([k,n])=>{
@@ -368,26 +407,37 @@ $('#orderSeg').addEventListener('click',e=>{const v=e.target.dataset.v;if(!v)ret
 $('#focusChips').addEventListener('click',e=>{const f=e.target.dataset.f;if(!f)return;cfg().focus=f;generate();});
 $('#genBtn').onclick=generate;
 $('#exList').addEventListener('click',e=>{
-  const b=e.target.closest('button[data-a]'); if(!b) return; const i=+b.dataset.i;
-  if(b.dataset.a==='up'&&i>0){[st.list[i-1],st.list[i]]=[st.list[i],st.list[i-1]];}
-  if(b.dataset.a==='del'){st.list.splice(i,1);}
-  if(b.dataset.a==='swap'){swapAt(i);return;}
+  const b=e.target.closest('button[data-a]'); if(!b) return; const i=+b.dataset.i, a=b.dataset.a;
+  if(a==='dur'){ editDur= editDur===i?-1:i; render(); return; }
+  if(a==='dm'||a==='dp'){ stepDur(i,a==='dp'?1:-1); return; }
+  if(a==='dreset'){ setDur(i,cfg().work); return; }
+  if(a==='up'&&i>0){[st.list[i-1],st.list[i]]=[st.list[i],st.list[i-1]]; editDur=-1; offerMerge(i-1);}
+  if(a==='del'){st.list.splice(i,1); editDur=-1; mergeAt=-1;}
+  if(a==='swap'){swapAt(i);return;}
   if(st.list.length>=2) cfg().count=st.list.length;
   markCustom(); save(); render();
 });
-$('#addSel').onchange=e=>{const v=e.target.value;if(!v)return;st.list.push(v);cfg().count=Math.max(2,st.list.length);markCustom();save();render();};
+$('#mergeBar').addEventListener('click',e=>{
+  if(e.target.id==='mergeYes'){
+    const a=st.list[mergeAt], b=st.list[mergeAt+1];
+    if(a&&b&&a.id===b.id){ const t=Math.min(DUR_MAX,durOf(a)+durOf(b)); a.dur= t===cfg().work?0:t; st.list.splice(mergeAt+1,1); if(st.list.length>=2) cfg().count=st.list.length; }
+    mergeAt=-1; editDur=-1; markCustom(); save(); render();
+  } else if(e.target.id==='mergeNo'){ mergeAt=-1; render(); }
+});
+$('#addSel').onchange=e=>{const v=e.target.value;if(!v)return;st.list.push({id:v,dur:0});offerMerge(st.list.length-1);cfg().count=Math.max(2,st.list.length);markCustom();save();render();};
 $$('[data-c]').forEach(i=>i.onchange=()=>{cfg()[i.dataset.c]=i.checked;save();});
 
 /* presets */
 $('#presetSel').onchange=e=>{
   const p=allPresets().find(x=>x.id===e.target.value); if(!p) return;
-  st.cfg={...cfg(),...p.cfg}; if(p.list) st.list=p.list.slice(); else if(p.cfg.mode==='workout'&&!p.list) {st.preset=p.id; generate();}
+  editDur=-1; mergeAt=-1;
+  st.cfg={...cfg(),...p.cfg}; if(p.list) st.list=p.list.map(norm); else if(p.cfg.mode==='workout'&&!p.list) {st.preset=p.id; generate();}
   st.preset=p.id; save(); render();
 };
 $('#presetSave').onclick=()=>{$('#saveRow').style.display='flex';$('#presetName').focus();};
 $('#presetSaveOk').onclick=()=>{
   const n=$('#presetName').value.trim(); if(!n) return;
-  const p={id:'u-'+Date.now(),name:n,cfg:{...cfg()},list:st.list.slice()};
+  const p={id:'u-'+Date.now(),name:n,cfg:{...cfg()},list:st.list.map(x=>({...x}))};
   st.presets.push(p); st.preset=p.id; $('#presetName').value=''; $('#saveRow').style.display='none'; save(); render();
 };
 let delArm=0;
@@ -417,7 +467,7 @@ function renderLib(){
   }).join('');
 }
 $('#libList').addEventListener('change',e=>{const id=e.target.dataset.lib;if(!id)return;if(e.target.checked)delete st.off[id];else st.off[id]=true;save();renderLib();});
-$('#libList').addEventListener('click',e=>{const id=e.target.dataset&&e.target.dataset.rm;if(!id)return;st.custom=st.custom.filter(x=>x.id!==id);st.list=st.list.filter(x=>x!==id);save();renderLib();});
+$('#libList').addEventListener('click',e=>{const id=e.target.dataset&&e.target.dataset.rm;if(!id)return;st.custom=st.custom.filter(x=>x.id!==id);st.list=st.list.filter(x=>x.id!==id);save();renderLib();});
 
 /* ---------- audio ---------- */
 let ac,master,nbuf;
@@ -466,13 +516,13 @@ $('#testSnd').onclick=()=>{unlock();ding(1);setTimeout(clapper,900);[0,1,2].forE
 
 /* ---------- sequence ---------- */
 function workOrder(){
-  const L=st.list.filter(id=>exById(id)), c=cfg(), out=[];
+  const L=st.list.filter(it=>exById(it.id)), c=cfg(), out=[];
   if(c.order==='circuit'){
-    for(let s=1;s<=c.sets;s++) L.forEach((id,j)=>out.push({ex:id,set:s,end:j===L.length-1}));
+    for(let s=1;s<=c.sets;s++) L.forEach((it,j)=>out.push({ex:it.id,dur:durOf(it),set:s,end:j===L.length-1}));
   } else {
     for(let p=0;p<L.length;p+=2){
       const pair=L.slice(p,p+2), tag=(p/2+1);
-      for(let s=1;s<=c.sets;s++) pair.forEach((id,j)=>out.push({ex:id,set:s,pair:tag+(j?'B':'A'),end:s===c.sets&&j===pair.length-1}));
+      for(let s=1;s<=c.sets;s++) pair.forEach((it,j)=>out.push({ex:it.id,dur:durOf(it),set:s,pair:tag+(j?'B':'A'),end:s===c.sets&&j===pair.length-1}));
     }
   }
   return out;
@@ -485,7 +535,7 @@ function buildSeq(){
   } else {
     const o=workOrder();
     o.forEach((w,i)=>{
-      s.push({type:'work',dur:c.work,round:i+1,total:o.length,ex:w.ex,set:w.set,pair:w.pair});
+      s.push({type:'work',dur:w.dur,round:i+1,total:o.length,ex:w.ex,set:w.set,pair:w.pair});
       if(i<o.length-1){ const r=(w.end&&c.setRest>0)?c.setRest:c.rest; if(r>0) s.push({type:'rest',dur:r,long:w.end&&c.setRest>0}); }
     });
   }
