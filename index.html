@@ -42,6 +42,10 @@ h1 small{font-family:Inter;font-size:13px;font-weight:600;color:var(--acc)}
 .chip{padding:8px 12px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:14px;font-weight:600;color:var(--mut)}
 .chip.on{background:var(--acc);border-color:var(--acc);color:#111}
 .toggle{position:relative;width:50px;height:30px;flex:none}
+.vol{padding:8px 0}.vol+.row,.row+.vol,.vol+.vol{border-top:1px solid var(--line)}
+.vol .vt{display:flex;justify-content:space-between;font-weight:600}.vol output{color:var(--acc);font-variant-numeric:tabular-nums}
+.vol input[type=range]{width:100%;margin:10px 0 2px;accent-color:var(--acc);height:28px}
+.vol .hint{display:block;font-size:12px;color:var(--mut);margin-top:2px}
 .toggle input{opacity:0;width:0;height:0}
 .toggle span{position:absolute;inset:0;background:var(--line);border-radius:30px;transition:.2s}
 .toggle span:before{content:"";position:absolute;width:24px;height:24px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
@@ -166,6 +170,11 @@ a.yt{color:#ff5a5a;text-decoration:none;font-weight:600;font-size:13px}
     <div class="row"><label>Beeps 3-2-1</label><label class="toggle"><input type="checkbox" data-c="beeps"><span></span></label></div>
     <div class="row"><label>Vibrate<span class="hint">Android only</span></label><label class="toggle"><input type="checkbox" data-c="vib"><span></span></label></div>
     <div class="row"><label>Voice<span class="hint">Says the next exercise just after the 10s clapper</span></label><label class="toggle"><input type="checkbox" data-c="voice"><span></span></label></div>
+    <div class="vol"><div class="vt"><span>Voice volume</span><output id="o_voiceVol"></output></div><input type="range" min="50" max="300" step="10" data-vol="voiceVol"><span class="hint">Over 100% boosts the voice above normal phone level (app only)</span></div>
+    <div class="vol"><div class="vt"><span>Bell, clapper &amp; beeps volume</span><output id="o_sfxVol"></output></div><input type="range" min="50" max="300" step="10" data-vol="sfxVol"></div>
+    <div class="vol"><div class="vt"><span>Spotify / music during voice &amp; bells</span></div>
+      <div class="seg" id="musicSeg" style="margin-top:8px"><button data-v="duck">Lower it</button><button data-v="pause">Pause it</button><button data-v="off">Leave it</button></div>
+      <span class="hint" id="musicHint">Music dips while the timer talks or rings, then comes back up. Use the phone volume buttons for overall level.</span></div>
     <div class="flex" style="margin-top:8px"><button class="btn sm" id="testSnd">🔊 Test sounds</button><span class="mut">Single bell = go · triple bell = end of round</span></div>
   </div>
 
@@ -245,7 +254,7 @@ const FOCUS={
 };
 
 /* ---------- state ---------- */
-const DEF_CFG={mode:'timer',rounds:3,work:180,rest:60,ready:10,focus:'upper',count:8,sets:3,order:'circuit',setRest:0,clap:true,beeps:true,vib:true,voice:true};
+const DEF_CFG={mode:'timer',rounds:3,work:180,rest:60,ready:10,focus:'upper',count:8,sets:3,order:'circuit',setRest:0,clap:true,beeps:true,vib:true,voice:true,voiceVol:200,sfxVol:150,music:'duck'};
 let st={cfg:{...DEF_CFG},list:[],off:{},custom:[],presets:[],preset:'p-boxing'};
 try{const s=JSON.parse(localStorage.getItem(KEY)||'null'); if(s){st={...st,...s,cfg:{...DEF_CFG,...(s.cfg||{})}};}}catch(e){}
 const cfg=()=>st.cfg;
@@ -364,6 +373,9 @@ function render(){
   $('#roundsRow').style.display=c.mode==='timer'?'':'none';
   $('#workoutCard').style.display=c.mode==='workout'?'':'none';
   $$('[data-c]').forEach(i=>i.checked=!!c[i.dataset.c]);
+  $$('[data-vol]').forEach(i=>{i.value=c[i.dataset.vol];$('#o_'+i.dataset.vol).textContent=c[i.dataset.vol]+'%';});
+  $$('#musicSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===c.music));
+  if(!NATIVE) $('#musicHint').textContent='Only works in the Android app version (APK). In the browser, turn Spotify down instead.';
   $('#orderHint').textContent=c.order==='circuit'
     ? 'Do every exercise once, then go round again for each set.'
     : 'Pair 1+2, 3+4… Do A, B, A, B for all sets, then move to the next pair.';
@@ -426,6 +438,8 @@ $('#mergeBar').addEventListener('click',e=>{
 });
 $('#addSel').onchange=e=>{const v=e.target.value;if(!v)return;st.list.push({id:v,dur:0});offerMerge(st.list.length-1);cfg().count=Math.max(2,st.list.length);markCustom();save();render();};
 $$('[data-c]').forEach(i=>i.onchange=()=>{cfg()[i.dataset.c]=i.checked;save();});
+$$('[data-vol]').forEach(i=>{i.oninput=()=>{const k=i.dataset.vol;cfg()[k]=+i.value;$('#o_'+k).textContent=i.value+'%';if(k==='sfxVol')setSfx();};i.onchange=()=>save();});
+$('#musicSeg').addEventListener('click',e=>{const v=e.target.dataset.v;if(!v)return;cfg().music=v;save();render();});
 
 /* presets */
 $('#presetSel').onchange=e=>{
@@ -471,13 +485,20 @@ $('#libList').addEventListener('click',e=>{const id=e.target.dataset&&e.target.d
 
 /* ---------- audio ---------- */
 let ac,master,nbuf;
-function A(){ if(!ac){const C=window.AudioContext||window.webkitAudioContext; ac=new C(); master=ac.createGain(); master.gain.value=0.9; master.connect(ac.destination);} if(ac.state==='suspended') ac.resume(); return ac; }
+function A(){ if(!ac){const C=window.AudioContext||window.webkitAudioContext; ac=new C(); master=ac.createGain();
+  // limiter after the master gain so boosted sounds get louder without crackling
+  const lim=ac.createDynamicsCompressor(); lim.threshold.value=-3; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.002; lim.release.value=0.15;
+  master.connect(lim).connect(ac.destination); setSfx();} if(ac.state==='suspended') ac.resume(); return ac; }
+function setSfx(){ if(master) master.gain.value=0.9*((cfg().sfxVol||100)/100); }
+// ask the Android app to lower/pause other music (Spotify) for the next ms milliseconds
+function duck(ms){ if(!NATIVE) return; try{ AndroidApp.duck(ms|0, cfg().music||'duck'); }catch(e){} }
 function unlock(){
   try{ if(!NATIVE && 'speechSynthesis' in window && !window.__spk){ window.__spk=1; const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u);} }catch(e){}
   try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
   try{ const c=A(), b=c.createBuffer(1,1,22050), s=c.createBufferSource(); s.buffer=b; s.connect(c.destination); s.start(0);}catch(e){}
 }
 function beep(freq=880,dur=0.17,at=0){
+  duck(1300);
   const c=A(),t=c.currentTime+at,o=c.createOscillator(),g=c.createGain();
   o.type='square'; o.frequency.value=freq;
   g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.28,t+0.008); g.gain.setValueAtTime(0.28,t+dur-0.03); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
@@ -493,7 +514,7 @@ function clapAt(t){
     s.connect(hp).connect(bp).connect(g).connect(master); s.start(st,Math.random()*0.2); s.stop(st+len+0.03);
   });
 }
-function clapper(){ const t=A().currentTime+0.02; clapAt(t); clapAt(t+0.2); clapAt(t+0.4); }
+function clapper(){ duck(1600); const t=A().currentTime+0.02; clapAt(t); clapAt(t+0.2); clapAt(t+0.4); }
 function bellAt(at){
   const c=A(),t=c.currentTime+at,base=720;
   [[1,0.55,2.4],[2.0,0.25,1.5],[2.76,0.22,1.1],[5.4,0.1,0.6],[8.93,0.05,0.35]].forEach(([r,a,d])=>{
@@ -502,14 +523,14 @@ function bellAt(at){
     o.connect(g).connect(master); o.start(t); o.stop(t+d+0.05);
   });
 }
-const ding=n=>{for(let i=0;i<n;i++)bellAt(i*0.36);};
+const ding=n=>{duck(2600+n*360);for(let i=0;i<n;i++)bellAt(i*0.36);};
 let voiceSel=null;
 function pickVoice(){ try{ const vs=speechSynthesis.getVoices(); voiceSel=vs.find(v=>/en[-_]GB/i.test(v.lang))||vs.find(v=>/^en/i.test(v.lang))||null; }catch(e){} }
 try{ if('speechSynthesis' in window){ pickVoice(); speechSynthesis.addEventListener('voiceschanged',pickVoice); } }catch(e){}
 function say(text){
   if(!cfg().voice) return;
-  if(NATIVE){ try{AndroidApp.speak(text);}catch(e){} return; }
-  try{ const u=new SpeechSynthesisUtterance(text); if(voiceSel){u.voice=voiceSel;u.lang=voiceSel.lang;} else u.lang='en-GB'; u.rate=1; u.volume=1; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){}
+  if(NATIVE){ try{AndroidApp.speak(text, cfg().voiceVol||100, cfg().music||'duck');}catch(e){} return; }
+  try{ const u=new SpeechSynthesisUtterance(text); if(voiceSel){u.voice=voiceSel;u.lang=voiceSel.lang;} else u.lang='en-GB'; u.rate=1; u.volume=Math.min(1,(cfg().voiceVol||100)/100); speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){}
 }
 const vib=p=>{ if(!cfg().vib) return; try{ if(NATIVE) AndroidApp.vibrate(Array.isArray(p)?p.join(','):String(p)); else navigator.vibrate&&navigator.vibrate(p);}catch(e){} };
 $('#testSnd').onclick=()=>{unlock();ding(1);setTimeout(clapper,900);[0,1,2].forEach(i=>setTimeout(()=>beep(),1900+i*1000));setTimeout(()=>ding(3),4900);setTimeout(()=>say('Next up: bicep curls'),6400);};
