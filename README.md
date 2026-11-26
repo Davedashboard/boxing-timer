@@ -1,6 +1,5 @@
-# Round Timer
-Boxing round timer with workout builder and supersets. Installable web app (PWA) — open the GitHub Pages URL on your phone and Add to Home Screen.
+# Muay Thai Round Timer
+Muay Thai / boxing round timer with workout builder, supersets and voice callouts. Installable web app (PWA): open the GitHub Pages URL on your phone and Add to Home Screen. There's also an Android app in `android/`, built by GitHub Actions.
 
-## Android app (APK)
-Every push to `main` builds an APK with GitHub Actions (`.github/workflows/build.yml`) from the same `index.html`, wrapped in a native shell in `android/` (phone text-to-speech, vibration, screen kept on). Download it from the **latest** release:
-https://github.com/Davedashboard/boxing-timer/releases/latest
+- Google Play listing text: [PLAY_STORE_LISTING.md](PLAY_STORE_LISTING.md)
+- Privacy policy: [privacy.html](https://davedashboard.github.io/boxing-timer/privacy.html)
