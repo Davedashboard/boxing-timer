@@ -1,7 +1,7 @@
 {
-  "name": "Round Timer",
-  "short_name": "Round Timer",
-  "description": "Boxing round timer with workouts and supersets",
+  "name": "Muay Thai Round Timer",
+  "short_name": "Muay Thai Timer",
+  "description": "Muay Thai and boxing round timer with workout builder, supersets and voice callouts",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
